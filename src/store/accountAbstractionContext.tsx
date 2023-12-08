@@ -6,7 +6,7 @@ import { SafeAuthInitOptions, SafeAuthPack } from '@safe-global/auth-kit'
 import { MoneriumPack, StripePack } from '@safe-global/onramp-kit'
 import { GelatoRelayPack } from '@safe-global/relay-kit'
 import { RelayResponse as GelatoRelayResponse } from '@gelatonetwork/relay-sdk'
-import Safe, { EthersAdapter } from '@safe-global/protocol-kit'
+import Safe, { EthersAdapter, SafeAccountConfig } from '@safe-global/protocol-kit'
 import { MetaTransactionData, MetaTransactionOptions } from '@safe-global/safe-core-sdk-types'
 
 import { initialChain } from 'src/constants/chains'
@@ -17,6 +17,8 @@ import getChain from 'src/utils/getChain'
 import { getERC20Info } from 'src/utils/getERC20Info'
 import getMoneriumInfo, { MoneriumInfo } from 'src/utils/getMoneriumInfo'
 import isMoneriumRedirect from 'src/utils/isMoneriumRedirect'
+import { SafeFactory } from '@safe-global/protocol-kit'
+import { ERC20ABI } from './abi'
 
 type accountAbstractionContextValue = {
   ownerAddress?: string
@@ -315,17 +317,76 @@ const AccountAbstractionProvider = ({ children }: { children: JSX.Element }) => 
     setGelatoTaskId(undefined)
   }, [chainId])
 
-  // relay-kit implementation using Gelato
-  const relayTransaction = async () => {
-    if (web3Provider) {
-      setIsRelayerLoading(true)
+  // relay-kit implementation using Gelat
+  const deploySafe = async () => {
+    try {
+      if (!web3Provider) {
+        return
+      }
 
-      // we use a dump safe transfer as a demo transaction
+      // // Deploy safe
+
+      const safeOwner = await web3Provider.getSigner()
+      const ethAdapter = new EthersAdapter({ ethers, signerOrProvider: safeOwner })
+      const safeVersion = '1.4.1'
+      const safeFactory = await SafeFactory.create({ ethAdapter, safeVersion })
+
+      const safeAccountConfig: SafeAccountConfig = {
+        owners: ['0x81AE146Df51fDB932297374f9b0bD95f862A7885'],
+        threshold: 1
+        // to, // Optional
+        // data, // Optional
+        // fallbackHandler, // Optional
+        // paymentToken, // Optional
+        // payment, // Optional
+        // paymentReceiver // Optional
+      }
+      // console.log('safe deployment started  ')
+      const safeSdk = await safeFactory.deploySafe({ safeAccountConfig })
+      console.log('safe test sdk deployed ', safeSdk)
+    } catch (error) {
+      console.log('safe test failed to deploy sdk ', error)
+    }
+  }
+
+  const enablePlugin = async () => {
+    if (!web3Provider) {
+      return
+    }
+    // const safeOwner = await web3Provider.getSigner()
+    // const ethAdapter = new EthersAdapter({ ethers, signerOrProvider: safeOwner })
+    // const safeSdk2 = await Safe.create({ ethAdapter, safeAddress: safeSelected })
+
+    console.log('safe test ', await accountAbstractionKit?.protocolKit.isSafeDeployed())
+
+    const pluginAddress = '0x09660d8Dc3369e37B6C4ef32dB6D0fB1aD0DEE52'
+
+    const safeTransaction: any = await accountAbstractionKit?.protocolKit.createEnableModuleTx(
+      pluginAddress
+    )
+
+    const txResponse = await accountAbstractionKit?.protocolKit.executeTransaction(safeTransaction)
+
+    await txResponse?.transactionResponse?.wait(1)
+
+    console.log('safe test enable plugin', txResponse)
+
+    const plugins = await accountAbstractionKit?.protocolKit.getModules()
+    console.log('safe test  plugins', plugins)
+  }
+
+  const transferTest = async (): Promise<GelatoRelayResponse | undefined> => {
+    let response
+    try {
+      const erc20Interface = new ethers.Interface(ERC20ABI)
+
+      const usdcAddress = '0xBD4B78B3968922e8A53F1d845eB3a128Adc2aA12'
+      const toAddress = '0x81AE146Df51fDB932297374f9b0bD95f862A7885'
       const dumpSafeTransafer: MetaTransactionData[] = [
         {
-          to: safeSelected,
-          data: '0x',
-          value: ethers.parseUnits('0.01', 'ether').toString(),
+          to: usdcAddress,
+          data: erc20Interface.encodeFunctionData('transfer', [toAddress, '100000000']),
+          value: ethers.parseUnits('0', 'ether').toString(),
           operation: 0 // OperationType.Call,
         }
       ]
@@ -336,14 +397,25 @@ const AccountAbstractionProvider = ({ children }: { children: JSX.Element }) => 
         gasToken: tokenAddress
       }
 
-      const response = (await accountAbstractionKit?.relayTransaction(
+      response = (await accountAbstractionKit?.relayTransaction(
         dumpSafeTransafer,
         options
       )) as GelatoRelayResponse
+    } catch (error) {
+      console.log('transferTest failed ', error)
+    }
+    return response
+  }
+
+  const relayTransaction = async () => {
+    if (web3Provider) {
+      setIsRelayerLoading(true)
+
+      const response = await transferTest()
 
       setIsRelayerLoading(false)
       console.log(response)
-      setGelatoTaskId(response.taskId)
+      setGelatoTaskId(response?.taskId)
     }
   }
 
